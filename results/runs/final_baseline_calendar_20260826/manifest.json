@@ -1,0 +1,92 @@
+{
+  "code_sha256": {
+    "backtest.py": "7186067beb1a2b7e8b349ce2422e886dae9fa9a68b14c8e05a320f4a70549261",
+    "engine.py": "0b1a200d19877006c4509ed136bd7e54a34a880d15562413a0eec182fd1f7322",
+    "strategy.py": "9001c19103c2881737898111bee7472ca2486b0d7da6a65ccc5c2e7574ceea6b"
+  },
+  "complete_days": 161,
+  "config": {
+    "account": 25000.0,
+    "clock": "calendar",
+    "commission": 0.65,
+    "contracts": 1,
+    "credit_haircut": 1.0,
+    "delta": 0.16,
+    "exit_iv_mult": 1.0,
+    "fail_closed_vix9d": true,
+    "iv_scale": 1.0,
+    "q": 0.012,
+    "r": 0.04,
+    "skip_bwd": false,
+    "slippage": 0.03,
+    "stop_mult": 2.0,
+    "structure": "strangle",
+    "tp_mult": 0.5,
+    "trend_filter": false,
+    "vix_max": 0.0,
+    "vix_min": 0.0
+  },
+  "created_utc": "20260826T204412Z",
+  "data_sources": {
+    "daily": {
+      "retrieved_utc": "2026-08-26T20:18:36.527816+00:00",
+      "source_url": "yfinance:SPY:1d"
+    },
+    "rth": {
+      "retrieved_utc": "2026-08-26T20:18:36.527816+00:00",
+      "source_url": "yfinance:SPY:1h"
+    },
+    "vix": {
+      "retrieved_utc": "2026-08-26T20:18:36.527816+00:00",
+      "source_url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
+    },
+    "vix9d": {
+      "retrieved_utc": "2026-08-26T20:18:36.527816+00:00",
+      "source_url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv"
+    }
+  },
+  "input_cache_sha256": {
+    "daily": "2c52b710f381b4d5149d501876835dab38585a76fd82d13d74e28918f38b4de3",
+    "rth": "26eaf41c8a2a426c2a34e4fd0ccfe82e05bce19091947a1eadd3988ed0701099",
+    "vix": "a8cff17bc487d95eb3196e6d722f9dc8203bcca9718046fd2d1e1c0f28d92907",
+    "vix9d": "750b3d4aec239e21401f4bab117ea80dbe0aa591e057c0f087fbf9bcdc31767f"
+  },
+  "period": {
+    "evaluated_schedule_end": "2026-08-26",
+    "first_complete_day": "2026-01-02",
+    "last_complete_day": "2026-08-26",
+    "requested_end": "2026-12-31",
+    "requested_start": "2026-01-01"
+  },
+  "source_ranges": {
+    "daily": [
+      "2023-11-01 00:00:00",
+      "2026-08-26 00:00:00"
+    ],
+    "hourly": [
+      "2023-09-28 09:30:00-04:00",
+      "2026-08-26 15:30:00-04:00"
+    ],
+    "vix": [
+      "2023-11-01 00:00:00",
+      "2026-08-25 00:00:00"
+    ],
+    "vix9d": [
+      "2023-11-01 00:00:00",
+      "2026-08-25 00:00:00"
+    ]
+  },
+  "summary": {
+    "avg_loss": -125.16,
+    "avg_win": 14.3,
+    "maxdd": -10874.93,
+    "pf": 0.0,
+    "pnl": -10874.91,
+    "pnl_over_dd": -1.0,
+    "ret_pct": -43.5,
+    "trades": 88,
+    "wr": 1.1
+  },
+  "trades": 88,
+  "warning": "Synthetic Black-Scholes/VIX scenario; no historical option quotes."
+}

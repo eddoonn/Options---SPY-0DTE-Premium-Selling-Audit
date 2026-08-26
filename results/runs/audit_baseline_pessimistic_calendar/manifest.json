@@ -1,0 +1,65 @@
+{
+  "code_sha256": {
+    "backtest.py": "eb625b7ed0a97fc16b6a93d900dd92fde2c5b57aa1f7b3bda9e122b6f034898f",
+    "engine.py": "349d4d038224868c94af4549dc25aa2dab06ae86853a01052401ff8ed8db43a5",
+    "strategy.py": "ddeed6c66f75fc398bb558ac156abb88030ae1b6b21b86756086f6b4deff8e4d"
+  },
+  "complete_days": 161,
+  "config": {
+    "account": 25000.0,
+    "clock": "calendar",
+    "commission": 0.65,
+    "contracts": 1,
+    "credit_haircut": 0.85,
+    "delta": 0.16,
+    "exit_iv_mult": 1.5,
+    "fail_closed_vix9d": true,
+    "iv_scale": 1.0,
+    "q": 0.012,
+    "r": 0.04,
+    "skip_bwd": false,
+    "slippage": 0.1,
+    "stop_mult": 2.0,
+    "structure": "strangle",
+    "tp_mult": 0.5,
+    "trend_filter": false,
+    "vix_max": 0.0,
+    "vix_min": 0.0
+  },
+  "created_utc": "20260826T200437Z",
+  "period": {
+    "end": "2026-12-31",
+    "start": "2026-01-01"
+  },
+  "source_ranges": {
+    "daily": [
+      "2023-11-01 00:00:00",
+      "2026-08-26 00:00:00"
+    ],
+    "hourly": [
+      "2023-09-28 09:30:00-04:00",
+      "2026-08-26 15:30:00-04:00"
+    ],
+    "vix": [
+      "2023-11-01 00:00:00",
+      "2026-08-26 00:00:00"
+    ],
+    "vix9d": [
+      "2026-08-26 00:00:00",
+      "2026-08-26 00:00:00"
+    ]
+  },
+  "summary": {
+    "avg_loss": -321.61,
+    "avg_win": 0.0,
+    "maxdd": -12864.53,
+    "pf": 0.0,
+    "pnl": -12864.49,
+    "pnl_over_dd": -1.0,
+    "ret_pct": -51.46,
+    "trades": 40,
+    "wr": 0.0
+  },
+  "trades": 40,
+  "warning": "Synthetic Black-Scholes/VIX scenario; no historical option quotes."
+}

@@ -1,0 +1,9 @@
+# local caches and secrets — never commit
+results/cache_*.pkl
+__pycache__/
+*.pyc
+.venv/
+.env
+signal.json
+# keep audit trails: results/runs/, optimization_runs/, stress_runs/ are committed intentionally
+!.gitkeep

@@ -1,0 +1,93 @@
+{
+  "code_sha256": {
+    "engine.py": "0b1a200d19877006c4509ed136bd7e54a34a880d15562413a0eec182fd1f7322",
+    "strategy.py": "9001c19103c2881737898111bee7472ca2486b0d7da6a65ccc5c2e7574ceea6b",
+    "stress.py": "4517db2e34b9b5a8008276785d54af157c87437b61401dc491663738308463e6"
+  },
+  "config": {
+    "account": 25000.0,
+    "clock": "trading",
+    "commission": 0.65,
+    "contracts": 1,
+    "credit_haircut": 1.0,
+    "delta": 0.2,
+    "exit_iv_mult": 1.0,
+    "fail_closed_vix9d": true,
+    "iv_scale": 1.0,
+    "q": 0.012,
+    "r": 0.04,
+    "skip_bwd": false,
+    "slippage": 0.03,
+    "stop_mult": 3.0,
+    "structure": "call",
+    "tp_mult": 0.0,
+    "trend_filter": false,
+    "vix_max": 25.0,
+    "vix_min": 0.0
+  },
+  "config_file_sha256": "f95db4ca58fbac3be4bbd63c5c67cd2c029329115fa85c9fc0a947bb9826ffbc",
+  "config_path": "C:\\Users\\Test Edon\\Desktop\\MatchForecast codes\\spx-spy-premium-selling\\results\\optimization_runs\\corrected_development_v3_20260826\\selected_config.json",
+  "created_utc": "20260826T204400Z",
+  "data_sources": {
+    "daily": "yfinance:SPY:1d",
+    "rth": "yfinance:SPY:1h",
+    "vix": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+    "vix9d": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv"
+  },
+  "input_cache_sha256": {
+    "daily": "2c52b710f381b4d5149d501876835dab38585a76fd82d13d74e28918f38b4de3",
+    "rth": "26eaf41c8a2a426c2a34e4fd0ccfe82e05bce19091947a1eadd3988ed0701099",
+    "vix": "a8cff17bc487d95eb3196e6d722f9dc8203bcca9718046fd2d1e1c0f28d92907",
+    "vix9d": "750b3d4aec239e21401f4bab117ea80dbe0aa591e057c0f087fbf9bcdc31767f"
+  },
+  "period_labels": {
+    "2024": "development",
+    "2025": "development",
+    "reused_2026": "previously inspected diagnostic"
+  },
+  "source_ranges": {
+    "daily": [
+      "2023-11-01 00:00:00",
+      "2026-08-26 00:00:00"
+    ],
+    "hourly": [
+      "2023-09-28 09:30:00-04:00",
+      "2026-08-26 15:30:00-04:00"
+    ],
+    "vix": [
+      "2023-11-01 00:00:00",
+      "2026-08-25 00:00:00"
+    ],
+    "vix9d": [
+      "2023-11-01 00:00:00",
+      "2026-08-25 00:00:00"
+    ]
+  },
+  "variants": {
+    "baseline": {},
+    "calendar_clock": {
+      "clock": "calendar"
+    },
+    "combined_adverse": {
+      "credit_haircut": 0.85,
+      "exit_iv_mult": 1.5,
+      "slippage": 0.1
+    },
+    "commission_1.30": {
+      "commission": 1.3
+    },
+    "credit_haircut_0.85": {
+      "credit_haircut": 0.85
+    },
+    "exit_iv_1.25": {
+      "exit_iv_mult": 1.25
+    },
+    "slippage_0.10": {
+      "slippage": 0.1
+    },
+    "slippage_0.20": {
+      "slippage": 0.2
+    }
+  },
+  "warning": "Synthetic prices only. Stress results are sensitivity checks, not validation."
+}

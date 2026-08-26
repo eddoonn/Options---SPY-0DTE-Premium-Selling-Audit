@@ -1,0 +1,32 @@
+name: Repo Scan (open)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install yfinance pandas numpy pandas-market-calendars requests
+      - name: Integrity tests
+        run: python -m unittest -v test_engine.py
+      - name: Verify signal builds
+        run: python daily_signal.py --dry-run
+      - name: List public contents
+        run: |
+          echo "Branch: $GITHUB_REF"
+          ls -R . | head -n 200
+          echo "Workflows:"
+          ls -l .github/workflows/
