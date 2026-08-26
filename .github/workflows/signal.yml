@@ -5,16 +5,13 @@ on:
     # 09:25 ET ≈ 13:25 UTC (covers EST/EDT). Runs before 09:30 open.
     - cron: "25 13 * * 1-5"
   workflow_dispatch:
-  push:
-    branches: [master, main]
-    paths:
-      - "daily_signal.py"
-      - "engine.py"
-      - "strategy.py"
-      - ".github/workflows/signal.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: spy-0dte-signal
+  cancel-in-progress: false
 
 jobs:
   signal:
