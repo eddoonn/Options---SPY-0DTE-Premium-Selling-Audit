@@ -175,10 +175,30 @@ python stress.py --config results/optimization_runs/corrected_development_v2_202
 continuity) but never evaluates or ranks on 2026 unless `--evaluate-reused-2026`
 is explicitly provided. `stress.py` never ranks configurations.
 
+## Live signal (Fix1 + Fix2 directional, locked)
+
+`daily_signal.py` posts one synthetic indication per NYSE session to Discord
+via `.github/workflows/signal.yml` (09:35 ET post-open, `DISCORD_WEBHOOK_URL`
+secret — never committed).
+
+- Fix1: strike re-solved at the live 09:30 SPY open (`S0_mode=live_open_0930`)
+  with live VIX; pre-open fallback uses the prior close (`proxy_prior_close`).
+- Fix2 directional: short-call skipped when the overnight up-gap
+  `(S_open - S0_proxy)` exceeds +0.5% or +4pts — proxy stale, NO TRADE.
+- Backtest engine is unchanged (strictly prior VIX/SMA). The live path uses
+  data available at signal time only; `S0_mode`/`vix_mode`/`gap_pts` are in
+  every payload and `signal.json` artifact.
+
+```bash
+python daily_signal.py --refresh --dry-run --json-out signal.json
+python daily_signal.py --refresh  # posts via DISCORD_WEBHOOK_URL
+```
+
 ## Files
 
 - `strategy.py`: Black-Scholes pricing and strategy configuration.
 - `engine.py`: source loading, session audit, simulation, and summaries.
+- `daily_signal.py`: locked live-signal (Fix1 open re-solve + Fix2 gap skip).
 - `backtest.py`: one-config audited run and immutable artifacts.
 - `optimize.py`: development-only deterministic grid selection.
 - `stress.py`: sensitivity analysis of one locked configuration.

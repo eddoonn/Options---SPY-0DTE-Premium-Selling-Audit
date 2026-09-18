@@ -1,9 +1,12 @@
 """
-signal.py — next-session synthetic indication (not a tradable order)
+daily_signal.py — next-session synthetic indication (not a tradable order)
 
-Uses only prior-session CBOE VIX/VIX9D + last SPY close as S0 proxy.
-Strike/price are Black-Scholes estimates (engine.py:93 strike_on_grid,
-strategy.py:9 bs_price) — no option quotes, no fills.
+Fix1 (S0 live): re-solve strike at 09:30 live SPY open when available,
+else fall back to prior-close proxy (S0_mode flags which).
+Fix2 (directional gap): skip short-call when overnight up-gap
+(S_open - S0_proxy) exceeds +0.5% OR +4pts — proxy stale, do not trade.
+Strike/price are Black-Scholes estimates (engine.py strike_on_grid,
+strategy.py bs_price) — no option quotes, no fills.
 All Discord messages carry the synthetic warning.
 """
 import argparse
@@ -15,6 +18,7 @@ import sys
 import pandas as pd
 import pandas_market_calendars as mcal
 import requests
+import yfinance as yf
 
 from engine import (
     DATA_SOURCES,
@@ -25,6 +29,10 @@ from engine import (
     year_fraction,
 )
 from strategy import Config, bs_delta, bs_price
+
+# Fix2 thresholds (directional up-gap only — short calls hurt on up gaps)
+GAP_PCT_THRESH = 0.005
+GAP_PTS_THRESH = 4.0
 
 # Locked development-selected config (2024-2025 only)
 # results/optimization_runs/corrected_development_v3_20260826/selected_config.json:1
@@ -67,9 +75,58 @@ def next_session(today=None):
         return None
     for sess_date, row in sched.iterrows():
         d = sess_date.date()
-        if d >= start:
-            return d, row
+        if d < start:
+            continue
+        if d == start:
+            # After today's close, roll to next session (evening runs target next day)
+            try:
+                close = row["market_close"].tz_convert(NY_TZ)
+                if now >= close:
+                    continue
+            except Exception:
+                pass
+        return d, row
     return None
+
+
+def _flat_cols(df):
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    return df
+
+
+def fetch_live_open(target_date):
+    """Fix1: 09:30 live SPY open for target session via yfinance 1m. None if unavailable (pre-open)."""
+    try:
+        df = _flat_cols(yf.download("SPY", period="3d", interval="1m", prepost=False,
+                                    progress=False, auto_adjust=False))
+        if df.empty:
+            return None
+        idx = df.index
+        if idx.tz is None:
+            idx = idx.tz_localize(NY_TZ)
+        else:
+            idx = idx.tz_convert(NY_TZ)
+        df.index = idx
+        day = df[df.index.date == target_date]
+        if day.empty:
+            return None
+        # First regular-session print ≈ 09:30 ET open
+        return float(day.iloc[0]["Open"])
+    except Exception:
+        return None
+
+
+def fetch_live_vix():
+    """Live VIX estimate via yfinance ^VIX 1m last print. None if unavailable."""
+    try:
+        df = _flat_cols(yf.download("^VIX", period="1d", interval="1m", prepost=False,
+                                    progress=False, auto_adjust=False))
+        if df.empty:
+            return None
+        return float(df["Close"].dropna().iloc[-1])
+    except Exception:
+        return None
 
 
 def prior_trading_day(target, daily_index):
@@ -125,15 +182,35 @@ def generate_signal(refresh=False):
         return {"error": f"Missing CBOE VIX for prior {prior}", "target": str(target_date), "prior": str(prior)}
 
     v9_prev = vix9_map.get(prior)
-    sigma = v_prev / 100.0
 
-    # S0 proxy = last SPY close (engine.py:203 S0 is open, but for pre-open signal we use prior close)
-    S0 = float(daily.loc[daily.index.date == prior].iloc[-1]["Close"]) if prior in {d.date() for d in daily.index} else float(daily["Close"].iloc[-1])
-    # Try to use most recent close if target is next day and we have last_daily close as better proxy
+    # S0 proxy = prior SPY close (engine.py S0 is open, but pre-open we only have prior close)
+    S0_proxy = float(daily.loc[daily.index.date == prior].iloc[-1]["Close"]) if prior in {d.date() for d in daily.index} else float(daily["Close"].iloc[-1])
     if last_daily == prior:
-        S0 = float(daily["Close"].iloc[-1])
+        S0_proxy = float(daily["Close"].iloc[-1])
 
-    session_hours = (sched["market_close"].tz_convert(NY_TZ) - sched["market_close"].tz_convert(NY_TZ).normalize() - pd.Timedelta(hours=0)).total_seconds()/3600
+    # Fix1: live 09:30 open + live VIX when available (post-open run)
+    S0_live = fetch_live_open(target_date)
+    vix_live = fetch_live_vix()
+    if S0_live is not None:
+        S0 = S0_live
+        S0_mode = "live_open_0930"
+    else:
+        S0 = S0_proxy
+        S0_mode = "proxy_prior_close"
+    # Live VIX only replaces prior VIX when we also have live S0 (same post-open bar);
+    # otherwise keep strictly-prior VIX to avoid mixing clocks.
+    if S0_live is not None and vix_live is not None:
+        vix_used = vix_live
+        vix_mode = "live_intraday"
+    else:
+        vix_used = v_prev
+        vix_mode = "prior_close"
+    sigma = vix_used / 100.0
+
+    # Fix2: directional overnight up-gap — short calls die on up gaps, proxy is stale
+    gap_pts = S0 - S0_proxy
+    gap_pct = gap_pts / S0_proxy if S0_proxy else 0.0
+
     # Use actual scheduled hours
     market_open = sched["market_open"].tz_convert(NY_TZ)
     market_close = sched["market_close"].tz_convert(NY_TZ)
@@ -142,14 +219,22 @@ def generate_signal(refresh=False):
 
     # VIX cap and backwardation checks
     skip_reasons = []
-    if SELECTED.vix_max and v_prev > SELECTED.vix_max:
-        skip_reasons.append(f"VIX {v_prev:.2f} > cap {SELECTED.vix_max}")
+    if SELECTED.vix_max and vix_used > SELECTED.vix_max:
+        skip_reasons.append(f"VIX {vix_used:.2f} > cap {SELECTED.vix_max}")
+    gap_skip = (S0_mode == "live_open_0930"
+                and gap_pts > 0
+                and (gap_pct > GAP_PCT_THRESH or gap_pts > GAP_PTS_THRESH))
+    if gap_skip:
+        skip_reasons.append(
+            f"overnight up-gap {gap_pts:+.2f} ({gap_pct:+.2%}) > +0.5%/+4pts — NO TRADE (proxy stale)"
+        )
 
     legs_selected = []
-    for kind in (["put", "call"] if SELECTED.structure == "strangle" else [SELECTED.structure]):
-        leg = build_leg(S0, T, sigma, kind, SELECTED)
-        if leg:
-            legs_selected.append(leg)
+    if not gap_skip:
+        for kind in (["put", "call"] if SELECTED.structure == "strangle" else [SELECTED.structure]):
+            leg = build_leg(S0, T, sigma, kind, SELECTED)
+            if leg:
+                legs_selected.append(leg)
 
     legs_baseline = []
     for kind in ["put", "call"]:
@@ -165,9 +250,19 @@ def generate_signal(refresh=False):
         "prior_data_date": str(prior),
         "session_hours": round(session_hours, 2),
         "year_fraction_T": round(T, 6),
-        "S0_proxy_prior_close": round(S0, 2),
-        "S0_note": "Prior close proxy; actual 09:30 open will differ — strike must be re-solved at open",
+        "S0_proxy_prior_close": round(S0_proxy, 2),
+        "S0_use": round(S0, 2),
+        "S0_mode": S0_mode,
+        "gap_pts": round(gap_pts, 2),
+        "gap_pct": round(gap_pct, 4),
+        "gap_filter": f"skip short-call if up-gap > +{GAP_PCT_THRESH:.1%}/+{GAP_PTS_THRESH:.0f}pts (live open only)",
+        "gap_skipped": bool(gap_skip),
+        "S0_note": ("09:30 live open re-solve (Fix1)" if S0_mode == "live_open_0930"
+                    else "Prior close proxy; strike must be re-solved at 09:30 open"),
         "vix_prev": round(v_prev, 2),
+        "vix_live": None if vix_live is None else round(vix_live, 2),
+        "vix_used": round(vix_used, 2),
+        "vix_mode": vix_mode,
         "vix9_prev": None if v9_prev is None else round(v9_prev, 2),
         "iv_sigma": round(sigma, 4),
         "data_sources": {k: daily.attrs.get("source_url", DATA_SOURCES[k]) if k == "daily" else vix.attrs.get("source_url", DATA_SOURCES[k]) if k == "vix" else vix9d.attrs.get("source_url", DATA_SOURCES[k]) if k == "vix9d" else rth.attrs.get("source_url", DATA_SOURCES[k]) for k in DATA_SOURCES},
@@ -201,26 +296,32 @@ def to_discord_payload(sig):
     sel = sig["selected_legs"]
     base = sig["baseline_legs"]
     skip = ", ".join(sig["selected_skip_reasons"]) if sig["selected_skip_reasons"] else "none"
+    s0_label = f"S0 {prov['S0_use']} ({prov['S0_mode']})"
+    gap_label = f"gap {prov['gap_pts']:+.2f} ({prov['gap_pct']:+.2%})"
+    vix_label = f"VIX used {prov['vix_used']} ({prov['vix_mode']}, prior {prov['vix_prev']})"
+    banner = "🛑 GAP SKIP — NO TRADE" if prov.get("gap_skipped") else None
 
     desc = (
         f"**SYNTHETIC — NOT tradable quotes**\n"
-        f"Target: **{prov['target_session']}** (prior data {prov['prior_data_date']}) · S0 proxy {prov['S0_proxy_prior_close']} · VIX {prov['vix_prev']} → σ {prov['iv_sigma']}\n"
-        f"T={prov['year_fraction_T']} ({prov['session_hours']}h, {sig['selected_config']['clock']})\n"
+        f"Target: **{prov['target_session']}** (prior data {prov['prior_data_date']}) · {s0_label} · {vix_label} → σ {prov['iv_sigma']}\n"
+        f"{gap_label} · T={prov['year_fraction_T']} ({prov['session_hours']}h, {sig['selected_config']['clock']})\n"
         f"Skip check: {skip}\n\n"
-        f"**Selected (dev 2024-25 only, call 20Δ 3x no-TP):**\n"
-        + ("\n".join(leg_line(l) for l in sel) if sel else "_no leg (credit ≤0.01 or VIX cap)_")
+        + (f"**{banner}**\n" if banner else "")
+        + f"**Selected (dev 2024-25 only, call 20Δ 3x no-TP):**\n"
+        + ("\n".join(leg_line(l) for l in sel) if sel else "_no trade (gap skip / VIX cap / credit ≤0.01)_")
         + "\n\n**Baseline (guide-literal 16Δ strangle 2x/50%):**\n"
         + ("\n".join(leg_line(l) for l in base) if base else "_no leg_")
         + f"\n\n_Data: CBOE VIX/VIX9D + yfinance SPY · {prov['source_ranges']['daily'][1]} as_of {prov['as_of_ny']}_"
-        + "\n⚠️ Paper model only — re-solve strike at 09:30 open with live VIX/price; forward test required."
+        + "\n⚠️ Paper model only — forward test required."
     )
 
     # Discord 2000 char limit
     if len(desc) > 4000:
         desc = desc[:4000]
 
+    title_prefix = "SKIP (gap) — " if prov.get("gap_skipped") else ""
     return {
-        "content": f"SPY 0DTE Synthetic Signal — {prov['target_session']} — {prov['S0_proxy_prior_close']} @ VIX {prov['vix_prev']}",
+        "content": f"{title_prefix}SPY 0DTE Synthetic Signal — {prov['target_session']} — {prov['S0_use']} ({prov['S0_mode']}) @ VIX {prov['vix_used']}",
         "embeds": [
             {
                 "title": "SPY 0DTE Premium-Selling Audit — Synthetic Signal",
