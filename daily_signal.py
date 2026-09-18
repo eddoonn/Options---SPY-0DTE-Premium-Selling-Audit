@@ -95,10 +95,10 @@ def _flat_cols(df):
     return df
 
 
-def fetch_live_open(target_date):
-    """Fix1: 09:30 live SPY open for target session via yfinance 1m. None if unavailable (pre-open)."""
+def fetch_live_open(symbol, target_date):
+    """Fix1: 09:30 live open for `symbol` on target session via yfinance 1m. None if unavailable (pre-open)."""
     try:
-        df = _flat_cols(yf.download("SPY", period="3d", interval="1m", prepost=False,
+        df = _flat_cols(yf.download(symbol, period="3d", interval="1m", prepost=False,
                                     progress=False, auto_adjust=False))
         if df.empty:
             return None
@@ -127,6 +127,21 @@ def fetch_live_vix():
         return float(df["Close"].dropna().iloc[-1])
     except Exception:
         return None
+
+
+def spx_closes():
+    """Prior SPX daily closes for the XSP proxy (XSP = SPX/10). Returns {date: close}."""
+    try:
+        df = _flat_cols(yf.download("^SPX", period="1mo", interval="1d", progress=False,
+                                    auto_adjust=False))
+        if df.empty:
+            return {}
+        idx = df.index
+        if getattr(idx, "tz", None) is not None:
+            idx = idx.tz_localize(None)
+        return {d.date(): float(c) for d, c in zip(idx, df["Close"].values) if pd.notna(c)}
+    except Exception:
+        return {}
 
 
 def prior_trading_day(target, daily_index):
@@ -189,7 +204,7 @@ def generate_signal(refresh=False):
         S0_proxy = float(daily["Close"].iloc[-1])
 
     # Fix1: live 09:30 open + live VIX when available (post-open run)
-    S0_live = fetch_live_open(target_date)
+    S0_live = fetch_live_open("SPY", target_date)
     vix_live = fetch_live_vix()
     if S0_live is not None:
         S0 = S0_live
@@ -242,6 +257,41 @@ def generate_signal(refresh=False):
         if leg:
             legs_baseline.append(leg)
 
+    # XSP (mini S&P 500: XSP = SPX/10, European cash-settled). Same rules,
+    # same VIX (VIX is SPX volatility), strike solved off the SPX open/close.
+    # $100 multiplier like SPY, so dollar math is identical.
+    xsp_legs, xsp_skip_reasons = [], []
+    XSP_S0 = XSP_mode = XSP_gap_pts = XSP_gap_pct = XSP_gap_skip = None
+    spx_map = spx_closes()
+    spx_prior = spx_map.get(prior)
+    if spx_prior is None:
+        xsp_skip_reasons.append("SPX data unavailable — no XSP ticket")
+    else:
+        XSP_proxy = spx_prior / 10.0
+        spx_live = fetch_live_open("^SPX", target_date)
+        XSP_live = spx_live / 10.0 if spx_live is not None else None
+        if XSP_live is not None:
+            XSP_S0, XSP_mode = XSP_live, "live_open_0930"
+        else:
+            XSP_S0, XSP_mode = XSP_proxy, "proxy_prior_close"
+        XSP_gap_pts = XSP_S0 - XSP_proxy
+        XSP_gap_pct = XSP_gap_pts / XSP_proxy if XSP_proxy else 0.0
+        if SELECTED.vix_max and vix_used > SELECTED.vix_max:
+            xsp_skip_reasons.append(f"VIX {vix_used:.2f} > cap {SELECTED.vix_max}")
+        XSP_gap_skip = (XSP_mode == "live_open_0930" and XSP_gap_pts > 0
+                        and (XSP_gap_pct > GAP_PCT_THRESH or XSP_gap_pts > GAP_PTS_THRESH))
+        if XSP_gap_skip:
+            xsp_skip_reasons.append(
+                f"overnight up-gap {XSP_gap_pts:+.2f} ({XSP_gap_pct:+.2%}) > +0.5%/+4pts — NO TRADE (proxy stale)"
+            )
+        if not xsp_skip_reasons:
+            for kind in (["put", "call"] if SELECTED.structure == "strangle" else [SELECTED.structure]):
+                leg = build_leg(XSP_S0, T, sigma, kind, SELECTED)
+                if leg:
+                    xsp_legs.append(leg)
+            if not xsp_legs and not xsp_skip_reasons:
+                xsp_skip_reasons.append("credit ≤0.01 — no XSP ticket")
+
     # Data provenance
     provenance = {
         "as_of_utc": pd.Timestamp.now(tz="UTC").isoformat(),
@@ -265,6 +315,11 @@ def generate_signal(refresh=False):
         "vix_mode": vix_mode,
         "vix9_prev": None if v9_prev is None else round(v9_prev, 2),
         "iv_sigma": round(sigma, 4),
+        "XSP_S0_use": None if XSP_S0 is None else round(XSP_S0, 2),
+        "XSP_S0_mode": XSP_mode,
+        "XSP_gap_pts": None if XSP_gap_pts is None else round(XSP_gap_pts, 2),
+        "XSP_gap_pct": None if XSP_gap_pct is None else round(XSP_gap_pct, 4),
+        "XSP_gap_skipped": bool(XSP_gap_skip),
         "data_sources": {k: daily.attrs.get("source_url", DATA_SOURCES[k]) if k == "daily" else vix.attrs.get("source_url", DATA_SOURCES[k]) if k == "vix" else vix9d.attrs.get("source_url", DATA_SOURCES[k]) if k == "vix9d" else rth.attrs.get("source_url", DATA_SOURCES[k]) for k in DATA_SOURCES},
         "source_ranges": {
             "daily": [str(daily.index.min()), str(daily.index.max())],
@@ -279,6 +334,8 @@ def generate_signal(refresh=False):
         "selected_config": {"structure": SELECTED.structure, "delta": SELECTED.delta, "stop": SELECTED.stop_mult, "tp": SELECTED.tp_mult, "vix_max": SELECTED.vix_max, "clock": SELECTED.clock},
         "selected_legs": legs_selected,
         "selected_skip_reasons": skip_reasons,
+        "xsp_legs": xsp_legs,
+        "xsp_skip_reasons": xsp_skip_reasons,
         "baseline_legs": legs_baseline,
         "baseline_config": {"structure": BASELINE.structure, "delta": BASELINE.delta, "stop": BASELINE.stop_mult, "tp": BASELINE.tp_mult},
     }
@@ -289,45 +346,92 @@ def to_discord_payload(sig):
         return {"content": f"⚠️ Signal error: {sig['error']} — {sig.get('target','')}", "embeds": []}
 
     prov = sig["provenance"]
-    # Build embed
-    def leg_line(l):
-        return f"{l['kind'].upper()} {l['strike']} | Δ {l['delta']:+.2f} | mid {l['mid']:.2f} → credit {l['credit']:.2f} | stop {l['stop_trigger']:.2f} | margin ~${l['est_margin']:.0f}"
+    target = prov["target_session"]
+
+    # Beginner-friendly dates: "Sep 18" and "Friday, September 18, 2026"
+    tdate = dt.date.fromisoformat(target)
+    exp_short = tdate.strftime("%b %d").replace(" 0", " ")
+    exp_long = tdate.strftime("%A, %B %d, %Y")
+
+    # Plain-English order ticket: ticker, side, strike, expiry, price, stop
+    def trade_card(ticker, l):
+        side = l["kind"].upper()
+        wins_if = (f"you profit if {ticker} stays below {l['strike']} when it expires"
+                   if l["kind"] == "call"
+                   else f"you profit if {ticker} stays above {l['strike']} when it expires")
+        upfront = l["credit"] * 100
+        card = (
+            f"SELL TO OPEN — 1 contract\n"
+            f"Ticker: {ticker}\n"
+            f"Option type: {side} ({wins_if})\n"
+            f"Strike price: {l['strike']}\n"
+            f"Expiry date: {exp_long} — expires TODAY at market close (0DTE)\n"
+            f"Sell price: ${l['credit']:.2f} (you collect about ${upfront:.0f} upfront)\n"
+            f"Stop loss: buy it back at ${l['stop_trigger']:.2f} (this caps your loss)"
+        )
+        if ticker == "XSP":
+            card += "\nNote: XSP is cash-settled — no shares change hands, just cash"
+        return card
+
+    def ref_line(l):
+        return (f"SELL SPY {l['strike']} {l['kind'].upper()} @ ${l['credit']:.2f}, "
+                f"stop ${l['stop_trigger']:.2f}, expires {exp_short}")
 
     sel = sig["selected_legs"]
+    xsp = sig.get("xsp_legs", [])
     base = sig["baseline_legs"]
     skip = ", ".join(sig["selected_skip_reasons"]) if sig["selected_skip_reasons"] else "none"
-    s0_label = f"S0 {prov['S0_use']} ({prov['S0_mode']})"
-    gap_label = f"gap {prov['gap_pts']:+.2f} ({prov['gap_pct']:+.2%})"
-    vix_label = f"VIX used {prov['vix_used']} ({prov['vix_mode']}, prior {prov['vix_prev']})"
-    banner = "🛑 GAP SKIP — NO TRADE" if prov.get("gap_skipped") else None
+    xskip = ", ".join(sig.get("xsp_skip_reasons", [])) if sig.get("xsp_skip_reasons") else "none"
 
+    if prov["S0_mode"] == "live_open_0930":
+        spy_ref = (f"SPY at ${prov['S0_use']} (live open price)")
+    else:
+        spy_ref = (f"SPY at ${prov['S0_use']} (yesterday's close — live open not out yet)")
+    if prov.get("XSP_S0_use") is None:
+        xsp_ref = "XSP n/a (SPX data missing)"
+    elif prov.get("XSP_S0_mode") == "live_open_0930":
+        xsp_ref = (f"XSP at ${prov['XSP_S0_use']} (live open price)")
+    else:
+        xsp_ref = (f"XSP at ${prov['XSP_S0_use']} (yesterday's close — live open not out yet)")
+    session_line = (f"Session: {exp_short} (using data up to {prov['prior_data_date']}) · "
+                    f"{spy_ref} · {xsp_ref} · VIX {prov['vix_used']}")
+    skip_line = (f"Skip check — SPY: {skip if skip != 'none' else 'trade ON'} · "
+                 f"XSP: {xskip if xskip != 'none' else 'trade ON'}")
+
+    blocks = []
+    for ticker, legs, reasons in (("SPY", sel, skip), ("XSP", xsp, xskip)):
+        if legs:
+            blocks.extend(trade_card(ticker, l) for l in legs)
+        else:
+            blocks.append(f"{ticker}: NO TRADE today. Reason: {reasons}")
     desc = (
-        f"**SYNTHETIC — NOT tradable quotes**\n"
-        f"Target: **{prov['target_session']}** (prior data {prov['prior_data_date']}) · {s0_label} · {vix_label} → σ {prov['iv_sigma']}\n"
-        f"{gap_label} · T={prov['year_fraction_T']} ({prov['session_hours']}h, {sig['selected_config']['clock']})\n"
-        f"Skip check: {skip}\n\n"
-        + (f"**{banner}**\n" if banner else "")
-        + f"**Selected (dev 2024-25 only, call 20Δ 3x no-TP):**\n"
-        + ("\n".join(leg_line(l) for l in sel) if sel else "_no trade (gap skip / VIX cap / credit ≤0.01)_")
-        + "\n\n**Baseline (guide-literal 16Δ strangle 2x/50%):**\n"
-        + ("\n".join(leg_line(l) for l in base) if base else "_no leg_")
-        + f"\n\n_Data: CBOE VIX/VIX9D + yfinance SPY · {prov['source_ranges']['daily'][1]} as_of {prov['as_of_ny']}_"
-        + "\n⚠️ Paper model only — forward test required."
+        "\n\n".join(blocks)
+        + f"\n\n{session_line}\n"
+        + skip_line
+        + f"\n\nReference model (not the trade, for testing only):\n"
+        + ("\n".join(ref_line(l) for l in base) if base else "no reference legs today")
     )
 
     # Discord 2000 char limit
     if len(desc) > 4000:
         desc = desc[:4000]
 
-    title_prefix = "SKIP (gap) — " if prov.get("gap_skipped") else ""
+    traded = ([f"SPY {l['strike']} {l['kind'].upper()} @ ${l['credit']:.2f} (STOP ${l['stop_trigger']:.2f})"
+               for l in sel]
+              + [f"XSP {l['strike']} {l['kind'].upper()} @ ${l['credit']:.2f} (STOP ${l['stop_trigger']:.2f})"
+                 for l in xsp])
+    if not traded:
+        content = f"NO TRADE — SPY/XSP {exp_short} (SPY: {skip} · XSP: {xskip})"
+    else:
+        content = f"SELL {' + '.join(traded)} — expires {exp_short} (today)"
     return {
-        "content": f"{title_prefix}SPY 0DTE Synthetic Signal — {prov['target_session']} — {prov['S0_use']} ({prov['S0_mode']}) @ VIX {prov['vix_used']}",
+        "content": content,
         "embeds": [
             {
-                "title": "SPY 0DTE Premium-Selling Audit — Synthetic Signal",
+                "title": f"SPY/XSP 0DTE Signal — {exp_short}",
                 "description": desc,
-                "color": 15158332,
-                "footer": {"text": "Synthetic Black-Scholes/VIX proxy — not financial advice"},
+                "color": 9807270 if not (sel or xsp) else 15158332,
+                "footer": {"text": "Not financial advice"},
                 "timestamp": prov["as_of_utc"],
             }
         ],

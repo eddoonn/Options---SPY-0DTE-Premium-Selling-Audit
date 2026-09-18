@@ -185,6 +185,10 @@ secret — never committed).
   with live VIX; pre-open fallback uses the prior close (`proxy_prior_close`).
 - Fix2 directional: short-call skipped when the overnight up-gap
   `(S_open - S0_proxy)` exceeds +0.5% or +4pts — proxy stale, NO TRADE.
+- Each signal carries two tickets: SPY and XSP (mini S&P 500, XSP = SPX/10,
+  European cash-settled). Same 20Δ/3x rules, same VIX, per-ticker gap skip.
+  Beginner-friendly format: ticker, side, strike, expiry date, price, stop —
+  no jargon.
 - Backtest engine is unchanged (strictly prior VIX/SMA). The live path uses
   data available at signal time only; `S0_mode`/`vix_mode`/`gap_pts` are in
   every payload and `signal.json` artifact.
